@@ -7,9 +7,41 @@ import socket
 import os.path
 import os
 import fnmatch
-import time
 import urllib2
-from BeautifulSoup import BeautifulSoup
+
+from HTMLParser import HTMLParser
+
+class FirstYoutubeURLFetcher(HTMLParser):
+    """ Perhaps one day beautifulsoup will be part of the standard library """
+    def __init__(self, title):
+        self.yt_base_url = "https://www.youtube.com"
+        self.yt_url = ""
+        self.title=title
+        self.__first_url_tag = ""
+        HTMLParser.__init__(self)
+
+    def make_request(self):
+        yt_search_query_str = "/results?search_query={}"
+        search_query = self.title.strip().replace(" ", "+")
+        res = urllib2.urlopen(self.yt_base_url +
+                              yt_search_query_str.format(search_query))
+        return res
+
+    def handle_starttag(self, tag, attrs):
+        if not self.__first_url_tag:
+            if tag == "h3":
+                for attr in attrs:
+                    if "yt-lockup-title " in attr:
+                        self.__first_url_tag = tag
+                        return
+
+        elif tag == "a" and self.__first_url_tag:
+            if not self.yt_url:
+                for attribs in attrs:
+                    attr, link_part = attribs
+                    if "href" in attr:
+                        self.yt_url = self.yt_base_url + link_part
+                        return
 
 def find_mpv_socket():
     base_dir = "/tmp"
@@ -49,24 +81,11 @@ def parse_info():
     return title
 
 def grab_youtube_url(title):
-    yt_base_url = "https://www.youtube.com"
-    yt_search_query_str = "/results?search_query={}"
-
-    search_query = title.strip().replace(" ", "+")
-
-    res = urllib2.urlopen(yt_base_url +
-                          yt_search_query_str.format(search_query))
-
-    yt_url = ""
-
+    f = FirstYoutubeURLFetcher(title)
+    res = f.make_request()
     if res.code == 200:
-        soup = BeautifulSoup(res.read())
-        query = soup.find(attrs={"class": "yt-lockup-title "})
-        if query:
-            link_part = query.first()["href"]
-            yt_url = yt_base_url + link_part
-
-    return yt_url
+        f.feed(res.read())
+    return f.yt_url
 
 
 def mpv_np(data, buffer, args):
